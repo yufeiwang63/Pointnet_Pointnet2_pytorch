@@ -67,7 +67,7 @@ class S3DISDataset(Dataset):
         # normalize
         selected_points = points[selected_point_idxs, :]  # num_point * 6
         current_points = np.zeros((self.num_point, 9))  # num_point * 9
-        current_points[:, 6] = selected_points[:, 0] / self.room_coord_max[room_idx][0]
+        current_points[:, 6] = selected_points[:, 0] / self.room_coord_max[room_idx][0] 
         current_points[:, 7] = selected_points[:, 1] / self.room_coord_max[room_idx][1]
         current_points[:, 8] = selected_points[:, 2] / self.room_coord_max[room_idx][2]
         selected_points[:, 0] = selected_points[:, 0] - center[0]

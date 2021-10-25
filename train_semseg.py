@@ -21,13 +21,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = BASE_DIR
 sys.path.append(os.path.join(ROOT_DIR, 'models'))
 
-classes = ['ceiling', 'floor', 'wall', 'beam', 'column', 'window', 'door', 'table', 'chair', 'sofa', 'bookcase',
-           'board', 'clutter']
-class2label = {cls: i for i, cls in enumerate(classes)}
-seg_classes = class2label
-seg_label_to_cat = {}
-for i, cat in enumerate(seg_classes.keys()):
-    seg_label_to_cat[i] = cat
+# TODO: I don't really need all these labels
+# classes = ['ceiling', 'floor', 'wall', 'beam', 'column', 'window', 'door', 'table', 'chair', 'sofa', 'bookcase',
+#            'board', 'clutter']
+# class2label = {cls: i for i, cls in enumerate(classes)}
+# seg_classes = class2label
+# seg_label_to_cat = {}
+# for i, cat in enumerate(seg_classes.keys()):
+#     seg_label_to_cat[i] = cat
 
 def inplace_relu(m):
     classname = m.__class__.__name__
@@ -36,7 +37,7 @@ def inplace_relu(m):
 
 def parse_args():
     parser = argparse.ArgumentParser('Model')
-    parser.add_argument('--model', type=str, default='pointnet_sem_seg', help='model name [default: pointnet_sem_seg]')
+    parser.add_argument('--model', type=str, default='pointnet_sem_seg_msg', help='model name [default: pointnet_sem_seg_ssg]')
     parser.add_argument('--batch_size', type=int, default=16, help='Batch Size during training [default: 16]')
     parser.add_argument('--epoch', default=32, type=int, help='Epoch to run [default: 32]')
     parser.add_argument('--learning_rate', default=0.001, type=float, help='Initial learning rate [default: 0.001]')
@@ -199,7 +200,7 @@ def main(args):
             correct = np.sum(pred_choice == batch_label)
             total_correct += correct
             total_seen += (BATCH_SIZE * NUM_POINT)
-            loss_sum += loss
+            loss_sum += loss.item()
         log_string('Training mean loss: %f' % (loss_sum / num_batches))
         log_string('Training accuracy: %f' % (total_correct / float(total_seen)))
 
@@ -241,7 +242,7 @@ def main(args):
                 batch_label = target.cpu().data.numpy()
                 target = target.view(-1, 1)[:, 0]
                 loss = criterion(seg_pred, target, trans_feat, weights)
-                loss_sum += loss
+                loss_sum += loss.item()
                 pred_val = np.argmax(pred_val, 2)
                 correct = np.sum((pred_val == batch_label))
                 total_correct += correct
@@ -262,13 +263,13 @@ def main(args):
             log_string('eval point avg class acc: %f' % (
                 np.mean(np.array(total_correct_class) / (np.array(total_seen_class, dtype=np.float) + 1e-6))))
 
-            iou_per_class_str = '------- IoU --------\n'
-            for l in range(NUM_CLASSES):
-                iou_per_class_str += 'class %s weight: %.3f, IoU: %.3f \n' % (
-                    seg_label_to_cat[l] + ' ' * (14 - len(seg_label_to_cat[l])), labelweights[l - 1],
-                    total_correct_class[l] / float(total_iou_deno_class[l]))
+            # iou_per_class_str = '------- IoU --------\n'
+            # for l in range(NUM_CLASSES):
+            #     iou_per_class_str += 'class %s weight: %.3f, IoU: %.3f \n' % (
+            #         seg_label_to_cat[l] + ' ' * (14 - len(seg_label_to_cat[l])), labelweights[l - 1],
+            #         total_correct_class[l] / float(total_iou_deno_class[l]))
 
-            log_string(iou_per_class_str)
+            # log_string(iou_per_class_str)
             log_string('Eval mean loss: %f' % (loss_sum / num_batches))
             log_string('Eval accuracy: %f' % (total_correct / float(total_seen)))
 
