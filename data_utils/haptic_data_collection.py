@@ -21,6 +21,8 @@ parser.add_argument('--save_name', type=str, default='2021-10-21')
 parser.add_argument('--save_data', type=int, default=0)
 parser.add_argument('--split', type=str, default='train')
 parser.add_argument('--headless', type=int, default=0)
+parser.add_argument('--add_cloth', type=int, default=0)
+parser.add_argument('--compute_contact', type=int, default=0)
 args = parser.parse_args()
 
 fig = plt.figure()
@@ -49,7 +51,8 @@ box_z = 0.5 # was 0.5
 box_color_r = 0
 box_color_g = 0
 box_color_b = 0
-add_cloth = 0 # was 1
+add_cloth = args.add_cloth # was 1
+per_particle_mass = cloth_mass / (cloth_width * cloth_height)
 
 env_idx = scene_idx[robot_name]
 if robot_name == 'fetch':
@@ -60,7 +63,7 @@ elif robot_name == 'sawyer':
     cam_pos = [-0.423, 0.806065, 1.274992]
     cam_angle = [-0.400000, -0.3080, 0.0]
     scene_params = [*cam_pos, *cam_angle, box_scale, box_z, use_table, max_force_show, 
-        box_color_r, box_color_g, box_color_g]
+        box_color_r, box_color_g, box_color_g, add_cloth]
     # scene_params = []
 robot_params = []
 
@@ -77,7 +80,7 @@ else:
 
 def get_action(robot_name, t, args):
     if robot_name == 'sawyer':
-        if args.save_data:
+        if args.load_robot_state:
             if t <= 10:
                 action = [0, 0, 0, 0, 0, 0, -0.001]
             elif t <= 50 and t > 10:
@@ -147,7 +150,6 @@ def get_initial_object_pc():
     
 voxelized_object_pc = get_initial_object_pc() # this is voxelized already
 
-# TODO: get initial object mask
 # load pre-stored robot and cloth state
 if args.load_robot_state:
     for _ in range(200):
@@ -178,7 +180,7 @@ for _ in range(T):
     pyflex.step(action)
     pyflex.render()
 
-    if args.save_data:
+    if args.compute_contact:
         # soft-rigid contact
         contact_info = pyflex.get_soft_rigid_contact()
         contact_info = contact_info.reshape((-1, 17))   
@@ -189,7 +191,7 @@ for _ in range(T):
         contact_rigid_pos = contact_info[:, :3] 
         contact_cloth_pos = contact_info[:, 3:6]
         contact_normal = -contact_info[:, 6:9]
-        contact_force = contact_lambda * (cloth_mass / (cloth_width * cloth_height))
+        contact_force = contact_lambda * (per_particle_mass)
         contact_normal_force = contact_force[:, None] * contact_normal
         contact_cloth_pos_add_force = contact_cloth_pos + contact_normal_force
         # print("soft contact number: ", contact_info.shape[0])
@@ -235,10 +237,22 @@ for _ in range(T):
         ### filter out the gripper-cloth contact
         box_y_upper = np.max(voxelized_object_pc[:, 1])
         box_contact_idx = contact_rigid_pos[:, 1] < box_y_upper + 0.05
+        gripper_contact_idx = np.logical_not(box_contact_idx)
+
+        gripper_lambda = contact_lambda[gripper_contact_idx]
+        gipper_normal = contact_normal[gripper_contact_idx]
+        gripper_force = gripper_lambda * (per_particle_mass)
+        gripper_force_total = np.sum(gripper_force)
+        gripper_normal_force = gripper_force[:, None] * gipper_normal
+        girpper_normal_force_total = np.sum(gripper_normal_force, axis=0)
+        print("gripper_lambda: ", gripper_lambda)
+        print("gripper_force: ", gripper_force)
+        print("gripper_force total: ", gripper_force_total)
+
         contact_rigid_pos = contact_rigid_pos[box_contact_idx]
         contact_normal = contact_normal[box_contact_idx]
         contact_lambda = contact_lambda[box_contact_idx]
-        contact_force = contact_lambda * (cloth_mass / (cloth_width * cloth_height))
+        contact_force = contact_lambda * (per_particle_mass)
         contact_normal_force = contact_force[:, None] * contact_normal
 
         ### the projection of the contact point is only to the object voxelized pointcloud
@@ -253,7 +267,7 @@ for _ in range(T):
         one_hot_encoding = np.zeros(voxelized_pc.shape[0])
         one_hot_encoding[:pc_cnt_object] = 1 # object: 1; cloth: 0
 
-        if save_path is not None:
+        if save_path is not None and args.save_data:
             if contact_rigid_pos.shape[0] > 0:
                 print("save data point {}".format(data_cnt))
                 data_to_store = np.concatenate([

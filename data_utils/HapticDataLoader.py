@@ -33,7 +33,7 @@ class HapticDataset(Dataset):
             data = np.load(data_path)  # xyz + one-hot + contact label, N*5
             points, contact_labels = data[:, 0:4], data[:, 4] 
             forces = data[:, 5]
-            forces = np.log(forces * (80 * 80) + 1e-10)
+            forces = forces * (80 * 80) # NOTE: predict lambda here
             normals = data[:, -3:]
             # tmp, _ = np.histogram(labels, range(14))
             # labelweights += tmp

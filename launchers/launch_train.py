@@ -12,12 +12,14 @@ from Pointnet_Pointnet2_pytorch.train_semseg_haptic import run_task
 @click.option('--dry/--no-dry', default=False)
 def main(mode, debug, dry):
     # exp_prefix = '1017-pn-seuss-lr-schedule-larger-pos-weight'
-    exp_prefix = '1023-pn-force-non-shared'
+    # exp_prefix = '1025-pn-force-non-shared-visual'
+    exp_prefix = '1030-pn-force-non-shared-overfit-to-1'
+    exp_prefix = '1030-pn-force-non-shared-better-visual'
     vg = VariantGenerator()
 
     if not debug:
-        vg.add('use_batch_norm', [True])
-        vg.add('correct_z_rotation', [2, 0])
+        vg.add('use_batch_norm', [True, False])
+        vg.add('correct_z_rotation', [2])
         vg.add('epoch', [300])
         vg.add('loss_pos_weight', [-1])
         vg.add('batch_size', [1])
@@ -25,17 +27,22 @@ def main(mode, debug, dry):
         vg.add('seed', [100])
         vg.add('manual_lr_adjust', [False])
         vg.add('schedule_lr', [True])
-        vg.add('data_dir', ['2021-10-21'])
-        vg.add('loss_on_contact', [True, False])
+        vg.add('data_dir', ['2021-10-21-balance'])
+        # vg.add('loss_on_contact', [True, False])
+        vg.add('force_loss_mode', ['balance'])
+        vg.add('normal_loss_mode', ['balance'])
         vg.add('force_loss_weight', [1])
         vg.add('normal_loss_weight', [1])
         vg.add('plot_interval', [20])
         vg.add('separate_model', [True])
+        # vg.add('load_dir', ['./data/seuss/1023-pn-force-non-shared/1023-pn-force-non-shared_2021_10_23_23_59_23_0002'])
+        vg.add('load_dir', [None])
+        vg.add('train', [True])
     else:
-        vg.add('correct_z_rotation', [False])
+        vg.add('correct_z_rotation', [2])
         vg.add('use_batch_norm', [True])
-        vg.add('epoch', [2])
-        vg.add('plot_interval', [1])
+        vg.add('epoch', [100])
+        vg.add('plot_interval', [100])
         vg.add('seed', [100])
         vg.add('loss_pos_weight', [-1])
         vg.add('batch_size', [1])
@@ -47,6 +54,8 @@ def main(mode, debug, dry):
         vg.add('force_loss_weight', [1])
         vg.add('normal_loss_weight', [1])
         vg.add('separate_model', [True])
+        vg.add('load_dir', ['./data/seuss/1023-pn-force-non-shared/1023-pn-force-non-shared_2021_10_23_23_59_23_0002'])
+        vg.add('train', [False])
 
         exp_prefix += '_debug'
 

@@ -39,16 +39,36 @@ def parse_args():
 
     return parser.parse_args()
 
-def plot(original_points, predictions, gt_label, force_pred, force_target, save_path):
+def plot(original_points, predictions, gt_label, force_pred, force_target, save_path, do_plot=True):
     original_points = original_points.reshape(-1, 3)
     force_pred = np.exp(force_pred)
     force_target = np.exp(force_target)
     xyz = original_points
-    fig = plt.figure(figsize=(18,12))
 
+    false_positive = np.logical_and(predictions == 1, gt_label == 0)
+    true_positive = np.logical_and(predictions == 1, gt_label == 1)
+    false_negative = np.logical_and(predictions == 0, gt_label == 1)
+    true_negative = np.logical_and(predictions == 0, gt_label == 0)
+
+    num_point = len(xyz)
+    tp = np.sum(true_positive) / num_point
+    fp = np.sum(false_positive) / num_point
+    tn = np.sum(true_negative) / num_point
+    fn = np.sum(false_negative) / num_point
+    precision = tp / (tp + fp + 1e-10)
+    recall = tp / (tp + fn + 1e-10)
+    f1 = 2 * precision * recall / (precision + recall)
+
+    if not do_plot:
+        return tp, fp, tn, fn, precision, recall, f1
+
+    fig = plt.figure(figsize=(18,12))
     gt_ax = fig.add_subplot(2, 3, 1, projection='3d')
     predict_ax = fig.add_subplot(2, 3, 2, projection='3d')
     error_ax = fig.add_subplot(2, 3, 3, projection='3d')
+    predict_ax.set_title("tp {:.3f} fp {:.3f} tn {:.3f} fn {:.3f} \n precision {:.3f} recall {:3f} f1 {:.3f}".format(
+        tp, fp, tn, fn, precision, recall, f1
+    ))
 
     # plot contact points
     for ax in [gt_ax, predict_ax, error_ax]:
@@ -56,16 +76,13 @@ def plot(original_points, predictions, gt_label, force_pred, force_target, save_
 
     pred_contact = xyz[predictions == 1]
     gt_contact = xyz[gt_label == 1]
-    error_pred = xyz[
-        np.logical_or(
-            np.logical_and(predictions == 1, gt_label == 0),
-            np.logical_and(predictions == 0, gt_label == 1)    
-        )    
-    ]
+    false_positive_contact = xyz[false_positive]
+    false_negative_contact = xyz[false_negative]
 
     predict_ax.scatter3D(pred_contact[:, 0], pred_contact[:, 2], pred_contact[:, 1], color='red')
     gt_ax.scatter3D(gt_contact[:, 0], gt_contact[:, 2], gt_contact[:, 1], color='red')
-    error_ax.scatter3D(error_pred[:, 0], error_pred[:, 2], error_pred[:, 1], color='red')
+    error_ax.scatter3D(false_positive_contact[:, 0], false_positive_contact[:, 2], false_positive_contact[:, 1], color='blue')
+    error_ax.scatter3D(false_negative_contact[:, 0], false_negative_contact[:, 2], false_negative_contact[:, 1], color='green')
 
 
     # plot force
@@ -120,22 +137,26 @@ def plot(original_points, predictions, gt_label, force_pred, force_target, save_
         ax.set_ylabel('Y')
         ax.set_zlabel('Z')
         # ax.set_aspect('equal')
-        max_range = np.array([X.max()-X.min(), Y.max()-Y.min(), Z.max()-Z.min()]).max() / 2.0
+        # max_range = np.array([X.max()-X.min(), Y.max()-Y.min(), Z.max()-Z.min()]).max() / 2.0
+        max_range = np.array([X.max()-X.min(), Y.max()-Y.min(), Z.max()-Z.min()]) / 2.0
         mid_x = (X.max()+X.min()) * 0.5
         mid_y = (Y.max()+Y.min()) * 0.5
         mid_z = (Z.max()+Z.min()) * 0.5
-        ax.set_xlim(mid_x - max_range, mid_x + max_range)
-        ax.set_ylim(mid_y + max_range, mid_y - max_range)
-        ax.set_zlim(mid_z - max_range, mid_z + max_range)
+        ax.set_xlim(mid_x - max_range[0], mid_x + max_range[0])
+        ax.set_ylim(mid_y + max_range[1], mid_y - max_range[1])
+        ax.set_zlim(mid_z - max_range[2], mid_z + max_range[2])
 
     # rotate the axis for better visual
     for ax in [gt_ax, predict_ax, error_ax, f_gt_ax, f_predict_ax, f_error_ax]:
         ax.view_init(30, 250)
 
     # plt.show()
+    # plt.colorbar()
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close("all")
+
+    return tp, fp, tn, fn, precision, recall, f1
         
 def main(args):
     def log_string(str):
@@ -225,5 +246,6 @@ def main(args):
     imageio.mimsave(osp.join(visual_dir, 'pred-visual.gif'), images)
 
 if __name__ == '__main__':
-    args = parse_args()
-    main(args)
+    pass
+    # args = parse_args()
+    # main(args)
