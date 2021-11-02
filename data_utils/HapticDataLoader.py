@@ -18,7 +18,10 @@ class HapticDataset(Dataset):
         self.use_random_center = use_random_center
 
         data_root = osp.join(data_root, split)
-        all_data_file = sorted(os.listdir(data_root))
+        all_data_file = os.listdir(data_root)
+        if "variant.json" in all_data_file:
+            all_data_file.remove("variant.json")
+        all_data_file = sorted(all_data_file)
         
         self.input_pc = []
         self.pc_contact_labels = []

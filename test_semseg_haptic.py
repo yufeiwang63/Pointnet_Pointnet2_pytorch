@@ -41,8 +41,6 @@ def parse_args():
 
 def plot(original_points, predictions, gt_label, force_pred, force_target, save_path, do_plot=True):
     original_points = original_points.reshape(-1, 3)
-    force_pred = np.exp(force_pred)
-    force_target = np.exp(force_target)
     xyz = original_points
 
     false_positive = np.logical_and(predictions == 1, gt_label == 0)

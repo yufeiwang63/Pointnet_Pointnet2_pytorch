@@ -12,17 +12,24 @@ import pcl
 from softgym.utils.visualization import save_numpy_as_gif
 import os
 import os.path as osp
+import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--save_robot_state', type=int, default=0)
 parser.add_argument('--load_robot_state', type=int, default=0)
 parser.add_argument('--show_interval', type=int, default=-1)
-parser.add_argument('--save_name', type=str, default='2021-10-21')
+parser.add_argument('--save_name', type=str, default='2021-10-31')
 parser.add_argument('--save_data', type=int, default=0)
 parser.add_argument('--split', type=str, default='train')
 parser.add_argument('--headless', type=int, default=0)
 parser.add_argument('--add_cloth', type=int, default=0)
+parser.add_argument('--use_table', type=int, default=0)
 parser.add_argument('--compute_contact', type=int, default=0)
+parser.add_argument('--box_scale', type=int, default=0.2)
+parser.add_argument('--initial_delta_y', type=float, default=-0.0015)
+parser.add_argument('--delta_x', type=float, default=0.004)
+parser.add_argument('--delta_y', type=float, default=0.)
+parser.add_argument('--delta_z', type=float, default=0.0005)
 args = parser.parse_args()
 
 fig = plt.figure()
@@ -33,6 +40,11 @@ scene_idx = {
     'franka': 10,
     'sawyer': 5 # 11
 }
+
+if args.save_data:
+    args.compute_contact = 1
+    args.add_cloth = 1
+    args.use_table = 0
 
 headless = args.headless
 render = True
@@ -45,8 +57,8 @@ cloth_mass = 0.5
 cloth_width = 80
 cloth_height = 40
 max_force_show = 300
-use_table = 1 # was 0
-box_scale = 0.05 # was 0.2
+use_table = args.use_table # was 0
+box_scale = args.box_scale # was 0.2
 box_z = 0.5 # was 0.5
 box_color_r = 0
 box_color_g = 0
@@ -75,6 +87,8 @@ if args.save_data:
     save_path = osp.join('data', 'haptic-perspective', args.save_name, args.split)
     if not osp.exists(save_path):
         os.makedirs(save_path, exist_ok=True)
+    with open(osp.join(save_path, 'variant.json'), 'w') as f:
+        json.dump(args.__dict__, f, indent=2, sort_keys=True)
 else:
     save_path = None
 
@@ -82,11 +96,11 @@ def get_action(robot_name, t, args):
     if robot_name == 'sawyer':
         if args.load_robot_state:
             if t <= 10:
-                action = [0, 0, 0, 0, 0, 0, -0.001]
+                action = [0, 0, 0, 0, 0, 0, args.initial_delta_y]
             elif t <= 50 and t > 10:
                 action = [0, -0.005, 0, 0, 0, 0, 0]
             elif t >= 50 and t < 250:
-                action = [0.004, 0, 0, 0, 0, 0, 0]
+                action = [args.delta_x, args.delta_y, args.delta_z, 0, 0, 0, 0]
             else:
                 action = [0, 0, 0, 0, 0, 0, 0]
         else:
@@ -213,7 +227,7 @@ for _ in range(T):
         img = img.reshape(camera_height, camera_width, 4)[::-1, :, :3]
         img = img.astype(np.uint8)
         all_images.append(img)
-        object_mask = get_obj_mask(img) # TODO: get cloth mask
+        object_mask = get_obj_mask(img) 
         # object_mask = np.logical_not(cloth_mask)
         # print(cloth_mask)
         depth[object_mask > 0] = 0

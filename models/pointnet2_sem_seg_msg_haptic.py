@@ -57,13 +57,14 @@ class get_shared_model(nn.Module):
         return (contact, normal, force), l4_points
 
 class get_model(nn.Module):
-    def __init__(self, use_batch_norm, num_out_channel, num_in_channel=7, target='contact'):
+    def __init__(self, use_batch_norm, num_out_channel, num_in_channel=7, target='contact',
+            radius_list=[[0.05, 0.1], [0.1, 0.2], [0.2, 0.4], [0.4, 0.8]]):
+        
         super(get_model, self).__init__()
-
-        self.sa1 = PointNetSetAbstractionMsg(1024, [0.05, 0.1], [16, 32], num_in_channel, [[16, 16, 32], [32, 32, 64]], use_batch_norm=use_batch_norm)
-        self.sa2 = PointNetSetAbstractionMsg(256, [0.1, 0.2], [16, 32], 32+64, [[64, 64, 128], [64, 96, 128]], use_batch_norm=use_batch_norm)
-        self.sa3 = PointNetSetAbstractionMsg(64, [0.2, 0.4], [16, 32], 128+128, [[128, 196, 256], [128, 196, 256]], use_batch_norm=use_batch_norm)
-        self.sa4 = PointNetSetAbstractionMsg(16, [0.4, 0.8], [16, 32], 256+256, [[256, 256, 512], [256, 384, 512]], use_batch_norm=use_batch_norm)
+        self.sa1 = PointNetSetAbstractionMsg(1024, radius_list[0], [16, 32], num_in_channel, [[16, 16, 32], [32, 32, 64]], use_batch_norm=use_batch_norm)
+        self.sa2 = PointNetSetAbstractionMsg(256, radius_list[1], [16, 32], 32+64, [[64, 64, 128], [64, 96, 128]], use_batch_norm=use_batch_norm)
+        self.sa3 = PointNetSetAbstractionMsg(64, radius_list[2], [16, 32], 128+128, [[128, 196, 256], [128, 196, 256]], use_batch_norm=use_batch_norm)
+        self.sa4 = PointNetSetAbstractionMsg(16, radius_list[3], [16, 32], 256+256, [[256, 256, 512], [256, 384, 512]], use_batch_norm=use_batch_norm)
         self.fp4 = PointNetFeaturePropagation(512+512+256+256, [256, 256], use_batch_norm=use_batch_norm)
         self.fp3 = PointNetFeaturePropagation(128+128+256, [256, 256], use_batch_norm=use_batch_norm)
         self.fp2 = PointNetFeaturePropagation(32+64+256, [256, 128], use_batch_norm=use_batch_norm)
