@@ -146,7 +146,7 @@ If you find this repo useful in your research, please consider citing it and our
 @article{Pytorch_Pointnet_Pointnet2,
       Author = {Xu Yan},
       Title = {Pointnet/Pointnet++ Pytorch},
-      Journal = {https://github.com/yanx27/Pointnet_Pointnet2_pytorch},
+      Journal = {https://github.com/yanx27/haptic.Pointnet_Pointnet2_pytorch},
       Year = {2019}
 }
 ```

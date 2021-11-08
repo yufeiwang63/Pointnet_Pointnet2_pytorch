@@ -104,7 +104,23 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
     mask = group_idx == N
     group_idx[mask] = group_first[mask]
+    # print("nsample is: ", nsample)
+    # print("group_idx shape is: ", group_idx.shape)
+    # print("=" * 50)
     return group_idx
+
+def all_point_sample(xyz, npoint):
+    """
+    Input:
+        xyz: pointcloud data, [B, N, 3]
+        npoint: number of samples
+    Return:
+        centroids: sampled pointcloud index, [B, npoint]
+    """
+    device = xyz.device
+    B, N, C = xyz.shape
+    centroids = torch.arange(N, dtype=torch.long).to(device).view(1, N).repeat([B, 1])
+    return centroids
 
 
 def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
@@ -203,7 +219,8 @@ class PointNetSetAbstraction(nn.Module):
 
 
 class PointNetSetAbstractionMsg(nn.Module):
-    def __init__(self, npoint, radius_list, nsample_list, in_channel, mlp_list, use_batch_norm=True):
+    def __init__(self, npoint, radius_list, nsample_list, in_channel, mlp_list, 
+        downsample=True, use_batch_norm=True, track_running_stats=True):
         super(PointNetSetAbstractionMsg, self).__init__()
         self.npoint = npoint
         self.radius_list = radius_list
@@ -221,11 +238,13 @@ class PointNetSetAbstractionMsg(nn.Module):
                 # print("last channel {} out channel {}".format(last_channel, out_channel))
                 convs.append(nn.Conv2d(last_channel, out_channel, 1))
                 if self.use_batch_norm:
-                    bns.append(nn.BatchNorm2d(out_channel))
+                    bns.append(nn.BatchNorm2d(out_channel, track_running_stats=track_running_stats))
                 last_channel = out_channel
             self.conv_blocks.append(convs)
             if self.use_batch_norm:
                 self.bn_blocks.append(bns)
+
+        self.downsample = downsample
 
     def forward(self, xyz, points):
         """
@@ -242,7 +261,12 @@ class PointNetSetAbstractionMsg(nn.Module):
 
         B, N, C = xyz.shape
         S = self.npoint
-        new_xyz = index_points(xyz, farthest_point_sample(xyz, S))
+        if self.downsample:
+            new_xyz = index_points(xyz, farthest_point_sample(xyz, S))
+        else:
+            new_xyz = xyz
+            S = N
+
         new_points_list = []
         for i, radius in enumerate(self.radius_list):
             # print("i {} radius {}".format(i, radius))
@@ -276,7 +300,7 @@ class PointNetSetAbstractionMsg(nn.Module):
 
 
 class PointNetFeaturePropagation(nn.Module):
-    def __init__(self, in_channel, mlp, use_batch_norm=True):
+    def __init__(self, in_channel, mlp, use_batch_norm=True, track_running_stats=True):
         super(PointNetFeaturePropagation, self).__init__()
         self.mlp_convs = nn.ModuleList()
         self.use_batch_norm = use_batch_norm
@@ -286,7 +310,7 @@ class PointNetFeaturePropagation(nn.Module):
         for out_channel in mlp:
             self.mlp_convs.append(nn.Conv1d(last_channel, out_channel, 1))
             if self.use_batch_norm:
-                self.mlp_bns.append(nn.BatchNorm1d(out_channel))
+                self.mlp_bns.append(nn.BatchNorm1d(out_channel, track_running_stats=track_running_stats))
             last_channel = out_channel
 
     def forward(self, xyz1, xyz2, points1, points2):

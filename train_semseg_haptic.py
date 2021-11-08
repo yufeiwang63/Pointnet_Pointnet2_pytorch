@@ -4,7 +4,7 @@ Date: Nov 2019
 """
 import argparse
 import os
-from Pointnet_Pointnet2_pytorch.data_utils.HapticDataLoader import HapticDataset
+from haptic.Pointnet_Pointnet2_pytorch.data_utils.HapticDataLoader import HapticDataset
 import torch
 import datetime
 import logging
@@ -13,11 +13,11 @@ import sys
 import importlib
 import shutil
 from tqdm import tqdm
-import Pointnet_Pointnet2_pytorch.provider as provider
+import haptic.Pointnet_Pointnet2_pytorch.provider as provider
 import numpy as np
 import time
 import torch.nn as nn
-from Pointnet_Pointnet2_pytorch.test_semseg_haptic import plot
+from haptic.visual import plot, plot_precision_recall_curve
 import imageio
 import os.path as osp
 from chester import logger
@@ -55,41 +55,6 @@ def parse_args():
     parser.add_argument('--lr_decay', type=float, default=0.7, help='Decay rate for lr decay [default: 0.7]')
 
     return parser.parse_args([])
-
-
-def plot_precision_recall_curve(pred_logits, true_label, save_name):
-    prob = 1 / (1 + np.exp(-pred_logits))
-    precisions = []
-    recalls = []
-    num_point = len(true_label)
-    half_res = []
-    for threshold in [i * 0.05 for i in range(20)]:
-        true_positive = np.logical_and(prob >= threshold, true_label > 0)
-        false_positive = np.logical_and(prob >= threshold, true_label == 0)
-        tp = np.sum(true_positive) / num_point
-        fp = np.sum(false_positive) / num_point
-        precision = tp / (tp + fp + 1e-10)
-
-        false_negative = np.logical_and(prob < threshold, true_label > 0)
-        true_negative = np.logical_and(prob < threshold, true_label == 0)
-        fn = np.sum(false_negative) / num_point
-        tn = np.sum(true_negative) / num_point
-        recall = tp / (tp + fn + 1e-10)
-        
-        if threshold == 0.5:
-            f1 = 2 * precision * recall / (precision + recall)
-            half_res += [tp, fp, tn, fn, precision, recall, f1]
-
-        precisions.append(precision)
-        recalls.append(recall)
-    
-    if save_name is not None:
-        plt.plot(precisions, recalls, '-o')
-        plt.xlabel("precision")
-        plt.ylabel("recall")
-        plt.savefig(save_name)
-    # plt.show()
-    return half_res
 
 def run_task(vv, log_dir, exp_name):
     args = parse_args()
@@ -132,10 +97,10 @@ def run_task(vv, log_dir, exp_name):
     print("start loading training data ...")
     TRAIN_DATASET = HapticDataset(split='train', data_root=root, num_point=NUM_POINT, block_size=1.0, sample_rate=1.0, transform=None)
     print("start loading test data ...")
-    TEST_DATASET = HapticDataset(split='train', data_root=root, num_point=NUM_POINT, block_size=1.0, sample_rate=1.0, transform=None)
+    TEST_DATASET = HapticDataset(split='valid', data_root=root, num_point=NUM_POINT, block_size=1.0, sample_rate=1.0, transform=None)
     train_num_point, train_pos_label_weight, train_data_idx = TRAIN_DATASET.get_dataset_statistics()
 
-    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=5,
+    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=False, num_workers=5,
                                                   pin_memory=True, drop_last=True,
                                                   worker_init_fn=lambda x: np.random.seed(x + int(time.time())))
     testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=1, shuffle=False, num_workers=10,
@@ -148,17 +113,24 @@ def run_task(vv, log_dir, exp_name):
     # print("The number of test data is: %d" % len(TEST_DATASET))
 
     '''MODEL LOADING'''
-    MODEL = importlib.import_module(args.model)
-    shutil.copy('Pointnet_Pointnet2_pytorch/models/%s.py' % args.model, str(experiment_dir))
-    shutil.copy('Pointnet_Pointnet2_pytorch/models/pointnet2_utils.py', str(experiment_dir))
+    # MODEL = importlib.import_module(args.model)
+    import haptic.Pointnet_Pointnet2_pytorch.models.pointnet2_sem_seg_msg_haptic as MODEL
+    shutil.copy('haptic/Pointnet_Pointnet2_pytorch/models/%s.py' % args.model, str(experiment_dir))
+    shutil.copy('haptic/Pointnet_Pointnet2_pytorch/models/pointnet2_utils.py', str(experiment_dir))
 
     if not vv['separate_model']:
         classifier = MODEL.get_shared_model(vv['use_batch_norm'], NUM_CLASSES).cuda()
     else:
         print("separately build model!", flush=True)
-        contact_classifier = MODEL.get_model(vv['use_batch_norm'], 1, target='contact', radius_list=vv['radius_list']).cuda()
-        force_classifier = MODEL.get_model(vv['use_batch_norm'], 1, target='force', radius_list=vv['radius_list']).cuda()
-        normal_classifier = MODEL.get_model(vv['use_batch_norm'], 3, target='normal', radius_list=vv['radius_list']).cuda()
+        contact_classifier = MODEL.get_model(vv['use_batch_norm'], 1, target='contact', 
+            radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
+            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
+        force_classifier = MODEL.get_model(vv['use_batch_norm'], 1, target='force', 
+            radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
+            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
+        normal_classifier = MODEL.get_model(vv['use_batch_norm'], 3, target='normal', 
+            radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
+            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
         all_classifiers = [contact_classifier, force_classifier, normal_classifier]
 
     if vv['loss_pos_weight'] > 0:
@@ -249,6 +221,13 @@ def run_task(vv, log_dir, exp_name):
         if isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm1d):
             m.momentum = momentum
 
+    def print_momentum(model):
+        for name, layer in model.named_modules():
+            if isinstance(layer, torch.nn.BatchNorm2d) or isinstance(layer, torch.nn.BatchNorm1d):
+                print(name, layer)
+                print(layer.running_mean)
+                print(layer.running_var, flush=True)
+
     LEARNING_RATE_CLIP = 1e-5
     MOMENTUM_ORIGINAL = 0.1
     MOMENTUM_DECCAY = 0.5
@@ -273,15 +252,18 @@ def run_task(vv, log_dir, exp_name):
             momentum = 0.01
         print('BN momentum updated to: %f' % momentum)
 
-        if not vv['separate_model']:
-            classifier = classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
-        else:
-            # for model in all_classifiers:
-                # model = model.apply(lambda x: bn_momentum_adjust(x, momentum))
-            # contact_classifier, force_classifier, normal_classifier = all_classifiers
-            contact_classifier = contact_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
-            force_classifier = force_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
-            normal_classifier = normal_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
+        if vv['adjust_momentum']:
+            if not vv['separate_model']:
+                classifier = classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
+            else:
+                # for model in all_classifiers:
+                    # model = model.apply(lambda x: bn_momentum_adjust(x, momentum))
+                # contact_classifier, force_classifier, normal_classifier = all_classifiers
+                contact_classifier = contact_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
+                force_classifier = force_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
+                normal_classifier = normal_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
+
+        print_momentum(contact_classifier)
 
         num_batches = len(trainDataLoader)
         total_correct = 0
@@ -295,9 +277,9 @@ def run_task(vv, log_dir, exp_name):
         else:
             # for model in all_classifiers:
             #     model = model.train()
-            contact_classifier = contact_classifier.train()
-            force_classifier = force_classifier.train()
-            normal_classifier = normal_classifier.train() 
+            contact_classifier.train()
+            force_classifier.train()
+            normal_classifier.train() 
             # force_classifier, normal_classifier = all_classifiers
 
         all_contact_pred = []
@@ -507,9 +489,9 @@ def run_task(vv, log_dir, exp_name):
                 #     model = model.eval()
                 # contact_classifier, force_classifier, normal_classifier = all_classifiers
                 if vv['set_eval_for_batch_norm']:
-                    contact_classifier = contact_classifier.eval()
-                    force_classifier = force_classifier.eval()
-                    normal_classifier = normal_classifier.eval()
+                    contact_classifier.eval()
+                    force_classifier.eval()
+                    normal_classifier.eval()
                 else:
                     pass
 
