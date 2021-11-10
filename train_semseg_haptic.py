@@ -91,19 +91,18 @@ def run_task(vv, log_dir, exp_name):
     '''LOG'''
     root = './data/haptic-perspective/{}'.format(vv['data_dir'])
     NUM_CLASSES = 1
-    NUM_POINT = args.npoint # NOTE: not used
     BATCH_SIZE = args.batch_size
 
     print("start loading training data ...")
-    TRAIN_DATASET = HapticDataset(split='train', data_root=root, num_point=NUM_POINT, block_size=1.0, sample_rate=1.0, transform=None)
+    TRAIN_DATASET = HapticDataset(split='train', data_root=root, num_point=args.npoint, transform=None)
     print("start loading test data ...")
-    TEST_DATASET = HapticDataset(split='valid', data_root=root, num_point=NUM_POINT, block_size=1.0, sample_rate=1.0, transform=None)
+    TEST_DATASET = HapticDataset(split='valid', data_root=root, num_point=args.npoint, transform=None)
     train_num_point, train_pos_label_weight, train_data_idx = TRAIN_DATASET.get_dataset_statistics()
 
-    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=False, num_workers=5,
+    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=8,
                                                   pin_memory=True, drop_last=True,
                                                   worker_init_fn=lambda x: np.random.seed(x + int(time.time())))
-    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=1, shuffle=False, num_workers=10,
+    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=1, shuffle=True, num_workers=8,
                                                  pin_memory=True, drop_last=True)
     # NOTE no weight is used for our task
     # weights = torch.Tensor(TRAIN_DATASET.labelweights).cuda()
@@ -263,7 +262,7 @@ def run_task(vv, log_dir, exp_name):
                 force_classifier = force_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
                 normal_classifier = normal_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
 
-        print_momentum(contact_classifier)
+        # print_momentum(contact_classifier)
 
         num_batches = len(trainDataLoader)
         total_correct = 0
@@ -286,7 +285,11 @@ def run_task(vv, log_dir, exp_name):
         all_batch_label = []
         force_relative_errors = []
         if vv['train']:
-            for i, (points, target, ori_xyz) in tqdm(enumerate(trainDataLoader), total=len(trainDataLoader), smoothing=0.9):
+            for i, (points, target, ori_xyz) in enumerate(trainDataLoader):
+                if vv['debug']:
+                    if i >= 100:
+                        break
+                
                 if not vv['separate_model']:
                     optimizer.zero_grad()
                 else:
@@ -378,26 +381,20 @@ def run_task(vv, log_dir, exp_name):
                 force_loss_sum += force_loss.item()
                 normal_loss_sum += normal_loss.item()
 
-                if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
-                    print("save plot at: ", save_visual_path, flush=True)
-                    plot(ori_xyz, pred_choice, contact_batch_label, 
-                            force_pred_numpy, force_target_numpy, 
-                            os.path.join(save_visual_path, "train-{}-{}.png".format(epoch, i)))
+                # if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
+                #     print("save plot at: ", save_visual_path, flush=True)
+                #     plot(ori_xyz, pred_choice, contact_batch_label, 
+                #             force_pred_numpy, force_target_numpy, 
+                #             os.path.join(save_visual_path, "train-{}-{}.png".format(epoch, i)))
 
-            if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
-                print("save gif at: ", save_visual_path, flush=True)
-                images = []
-                with imageio.get_writer(osp.join(save_visual_path, 'train-pred-visual-{}.gif'.format(epoch)), mode='I') as writer:
-                    for _ in range(len(trainDataLoader)):
-                        filename = os.path.join(save_visual_path, "train-{}-{}.png".format(epoch, _))
-                        image = imageio.imread(filename)
-                        writer.append_data(image)
-
-                # for _ in range(len(trainDataLoader)):
-                #     filename = os.path.join(save_visual_path, "train-{}-{}.png".format(epoch, _))
-                #     images.append(imageio.imread(filename))
-
-                # imageio.mimsave(osp.join(save_visual_path, 'train-pred-visual-{}.gif'.format(epoch)), images, format='GIF', duration=0.2)
+            # if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
+            #     print("save gif at: ", save_visual_path, flush=True)
+            #     images = []
+            #     with imageio.get_writer(osp.join(save_visual_path, 'train-pred-visual-{}.gif'.format(epoch)), mode='I') as writer:
+            #         for _ in range(len(trainDataLoader)):
+            #             filename = os.path.join(save_visual_path, "train-{}-{}.png".format(epoch, _))
+            #             image = imageio.imread(filename)
+            #             writer.append_data(image)
 
             if vv['schedule_lr']:
                 print("schedule learning rate!")
@@ -485,9 +482,6 @@ def run_task(vv, log_dir, exp_name):
             if not vv['separate_model']:
                 classifier = classifier.eval()
             else:
-                # for model in all_classifiers:
-                #     model = model.eval()
-                # contact_classifier, force_classifier, normal_classifier = all_classifiers
                 if vv['set_eval_for_batch_norm']:
                     contact_classifier.eval()
                     force_classifier.eval()
@@ -498,7 +492,11 @@ def run_task(vv, log_dir, exp_name):
             print('---- EPOCH %03d EVALUATION ----' % (global_epoch + 1))
             all_contact_pred = []
             all_batch_label = []
-            for i, (points, target, ori_xyz) in tqdm(enumerate(testDataLoader), total=len(testDataLoader), smoothing=0.9):
+            for i, (points, target, ori_xyz) in enumerate(testDataLoader):
+                if vv['debug']: 
+                    if i >= 100: # TODO: solve this
+                        break
+
                 points = points.data.numpy()
                 points = torch.Tensor(points)
                 points = points.float().cuda() 
@@ -570,14 +568,12 @@ def run_task(vv, log_dir, exp_name):
                 total_correct += correct
                 total_seen += points.shape[0] * points.shape[2]
 
-                if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
-                    print("save plot at: ", save_visual_path, flush=True)
-                    # if not os.path.exists(save_visual_path):
-                    #     os.makedirs(save_visual_path, exist_ok=True)
-
-                    plot(ori_xyz, contact_pred_val, batch_label, 
-                            force_pred_numpy, force_target_numpy, 
-                            os.path.join(save_visual_path, "eval-{}-{}.png".format(epoch, i)))
+                if i <= 25:
+                    if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
+                        print("save plot at: ", save_visual_path, flush=True)
+                        plot(ori_xyz, contact_pred_val, batch_label, 
+                                force_pred_numpy, force_target_numpy, 
+                                os.path.join(save_visual_path, "eval-{}-{}.png".format(epoch, i)))
 
             all_contact_pred = np.concatenate(all_contact_pred, axis=0).flatten()
             all_batch_label = np.concatenate(all_batch_label, axis=0).flatten()
@@ -585,27 +581,20 @@ def run_task(vv, log_dir, exp_name):
                 save_name = osp.join(save_visual_path, 'precision-recall-eval-{}.png'.format(epoch)) 
             else:
                 save_name = None
+
             tp, fp, tn, fn, precision, recall, f1 = \
                 plot_precision_recall_curve(all_contact_pred, all_batch_label, 
-                save_name=save_name)
+                    save_name=save_name)
 
             force_relative_error = np.mean(np.hstack(force_relative_errors)) * 100
 
-            if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
-                print("save gif at: ", save_visual_path, flush=True)
-                with imageio.get_writer(osp.join(save_visual_path, 'eval-pred-visual-{}.gif'.format(epoch)), mode='I') as writer:
-                    for _ in range(len(testDataLoader)):
-                        filename = os.path.join(save_visual_path, "eval-{}-{}.png".format(epoch, _))
-                        image = imageio.imread(filename)
-                        writer.append_data(image)
-
-                # images = []
-                # for _ in range(len(testDataLoader)):
-                #     filename = os.path.join(save_visual_path, "eval-{}-{}.png".format(epoch, _))
-                #     images.append(imageio.imread(filename))
-
-                # imageio.mimsave(osp.join(save_visual_path, 'eval-pred-visual-{}.gif'.format(epoch)), images, format='GIF', duration=0.2)
-            
+            # if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
+            #     print("save gif at: ", save_visual_path, flush=True)
+            #     with imageio.get_writer(osp.join(save_visual_path, 'eval-pred-visual-{}.gif'.format(epoch)), mode='I') as writer:
+            #         for _ in range(len(testDataLoader)):
+            #             filename = os.path.join(save_visual_path, "eval-{}-{}.png".format(epoch, _))
+            #             image = imageio.imread(filename)
+            #             writer.append_data(image)
 
             eval_acc = (total_correct / float(total_seen))
             print('eval mean loss: %f' % (loss_sum / float(num_batches)))
