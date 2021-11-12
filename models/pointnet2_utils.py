@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from time import time
 import numpy as np
+from haptic.Pointnet_Pointnet2_pytorch.utils import print_cuda
+
 
 def timeit(tag, t):
     print("{}: {}s".format(tag, time() - t))
@@ -37,6 +39,16 @@ def square_distance(src, dst):
     dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
     dist += torch.sum(src ** 2, -1).view(B, N, 1)
     dist += torch.sum(dst ** 2, -1).view(B, 1, M)
+    return dist
+
+def square_distance_np(src, dst):
+    src = src.data.cpu().numpy()
+    dst = dst.data.cpu().numpy()
+    B, N, _ = src.shape
+    _, M, _ = dst.shape
+    dist = -2 * np.matmul(src, np.transpose(dst, (0, 2, 1)))
+    dist += np.sum(src ** 2, -1).reshape(B, N, 1)
+    dist += np.sum(dst ** 2, -1).reshape(B, 1, M)
     return dist
 
 
@@ -108,6 +120,39 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     # print("group_idx shape is: ", group_idx.shape)
     # print("=" * 50)
     return group_idx
+
+def query_ball_point_np(radius, nsample, xyz, new_xyz):
+    """
+    Input:
+        radius: local region radius
+        nsample: max sample number in local region
+        xyz: all points, [B, N, 3]
+        new_xyz: query points, [B, S, 3]
+    Return:
+        group_idx: grouped points index, [B, S, nsample]
+    """
+    # device = xyz.device
+    B, N, C = xyz.shape
+    _, S, _ = new_xyz.shape
+    
+    group_idx = np.arange(N, dtype=np.long)
+    group_idx = np.tile(group_idx, (B, S, 1))
+    # print("group_idx shape: ", group_idx.shape)
+    sqrdists = square_distance_np(new_xyz, xyz)
+
+    group_idx[sqrdists > radius ** 2] = N
+    group_idx.sort(axis=-1)
+    group_idx = group_idx[:, :, :nsample]
+    group_first = group_idx[:, :, 0].reshape(B, S, 1)
+    group_first = np.tile(group_first, (1, 1, nsample))
+    # print("group first shape: ", group_first.shape)
+    # .reshape(B, S, 1).repeat([1, 1, nsample])
+    mask = group_idx == N
+    group_idx[mask] = group_first[mask]
+    # print("nsample is: ", nsample)
+    # print("group_idx shape is: ", group_idx.shape)
+    # print("=" * 50)
+    return torch.LongTensor(group_idx)
 
 def all_point_sample(xyz, npoint):
     """
@@ -271,7 +316,11 @@ class PointNetSetAbstractionMsg(nn.Module):
         for i, radius in enumerate(self.radius_list):
             # print("i {} radius {}".format(i, radius))
             K = self.nsample_list[i]
-            group_idx = query_ball_point(radius, K, xyz, new_xyz)
+            # print("right before query_ball_point_np, cuda usage")
+            # print_cuda()
+            group_idx = query_ball_point_np(radius, K, xyz, new_xyz)
+            # print("right before index_points, cuda usage")
+            # print_cuda()
             grouped_xyz = index_points(xyz, group_idx)
             grouped_xyz -= new_xyz.view(B, S, 1, C)
             if points is not None:
@@ -281,9 +330,11 @@ class PointNetSetAbstractionMsg(nn.Module):
                 grouped_points = grouped_xyz
 
             grouped_points = grouped_points.permute(0, 3, 2, 1)  # [B, D, K, S]
+            # print("grouped_points.shape: ", grouped_points.shape)
             # print("grouped points shape: ", grouped_points.shape)
             for j in range(len(self.conv_blocks[i])):
                 # print("conv {}".format(j))
+                # print_cuda()
                 conv = self.conv_blocks[i][j]
                 if self.use_batch_norm:
                     bn = self.bn_blocks[i][j]
@@ -296,6 +347,8 @@ class PointNetSetAbstractionMsg(nn.Module):
 
         new_xyz = new_xyz.permute(0, 2, 1)
         new_points_concat = torch.cat(new_points_list, dim=1)
+        # print("new_points_concat.shape", new_points_concat.shape)
+        # print_cuda()
         return new_xyz, new_points_concat
 
 
@@ -331,16 +384,30 @@ class PointNetFeaturePropagation(nn.Module):
         _, S, _ = xyz2.shape
 
         if S == 1:
+            # print("non square distance case")
             interpolated_points = points2.repeat(1, N, 1)
         else:
-            dists = square_distance(xyz1, xyz2)
-            dists, idx = dists.sort(dim=-1)
-            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            # print("square distance case")
+            # dists = square_distance(xyz1, xyz2)
+            # dists, idx = dists.sort(dim=-1)
+            # dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            # dist_recip = 1.0 / (dists + 1e-8)
 
-            dist_recip = 1.0 / (dists + 1e-8)
+            dists = square_distance_np(xyz1, xyz2)
+            # dists, idx = dists.sort(dim=-1)
+            # print(dists.shape)
+            idx = np.argsort(dists, axis=-1)
+            dists = np.sort(dists, axis=-1)
+            dists, idx = dists[:, :, :3], idx[:, :, :3]  # [B, N, 3]
+            dist_recip = torch.FloatTensor(1.0 / (dists + 1e-8)).to(xyz1.device)
+            # print("dist_recip shape: ",dist_recip.shape)
+            # print_cuda()
+
             norm = torch.sum(dist_recip, dim=2, keepdim=True)
             weight = dist_recip / norm
             interpolated_points = torch.sum(index_points(points2, idx) * weight.view(B, N, 3, 1), dim=2)
+            # print("after getting interpolated points")
+            # print_cuda()
 
         if points1 is not None:
             points1 = points1.permute(0, 2, 1)
@@ -356,5 +423,7 @@ class PointNetFeaturePropagation(nn.Module):
             else:
                 new_points = F.relu(conv(new_points))
 
+        # print("at end of interpolation forward pass")
+        # print_cuda()
         return new_points
 

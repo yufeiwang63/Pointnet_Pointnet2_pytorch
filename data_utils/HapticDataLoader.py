@@ -150,8 +150,7 @@ class HapticDataset(Dataset):
         if self.transform is not None:
             current_points, current_contact_labels = self.transform(current_points, current_contact_labels)
         
-        return current_points, (current_contact_labels, current_force_labels, current_normal_labels), \
-            old_points[selected_point_idxs, :3]
+        return current_points, current_contact_labels, current_force_labels, old_points[selected_point_idxs, :3]
 
     def __len__(self):
         # return self.data_num * self.num_iter

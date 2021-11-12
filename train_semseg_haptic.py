@@ -4,6 +4,7 @@ Date: Nov 2019
 """
 import argparse
 import os
+from typing_extensions import Concatenate
 from haptic.Pointnet_Pointnet2_pytorch.data_utils.HapticDataLoader import HapticDataset
 import torch
 import datetime
@@ -24,6 +25,33 @@ from chester import logger
 import json
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from matplotlib import pyplot as plt
+from haptic.Pointnet_Pointnet2_pytorch.utils import print_cuda
+
+
+def collate_wrapper(batch):
+    # print("batch is: ", batch)
+    # print("len of batch is: ", len(batch))
+    # for x in batch:
+    #     print(x)
+    bs = len(batch)
+    
+    current_points = [b[0] for b in batch]
+    dim_point = current_points[0].shape[0]
+    current_points = np.vstack(current_points).reshape((bs, dim_point, -1))
+    current_points = torch.FloatTensor(current_points)
+
+    contact_labels = [b[1] for b in batch]
+    contact_labels = np.vstack(contact_labels).reshape((bs, dim_point, -1))
+    contact_labels = torch.FloatTensor(contact_labels)
+
+    force_labels = [b[2] for b in batch]
+    force_labels = np.vstack(force_labels).reshape((bs, dim_point, -1))
+    force_labels = torch.FloatTensor(force_labels)
+
+    ori_xyz = [b[3] for b in batch]
+    ori_xyz = np.vstack(ori_xyz).reshape((bs, dim_point, -1))
+
+    return current_points, (contact_labels, force_labels), ori_xyz
 
 def inplace_relu(m):
     classname = m.__class__.__name__
@@ -102,10 +130,11 @@ def run_task(vv, log_dir, exp_name):
     else:
         train_pos_label_weight = args.train_pos_label_weight
 
-    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=8,
+    trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=vv['num_worker'],
                                                   pin_memory=True, drop_last=True,
-                                                  worker_init_fn=lambda x: np.random.seed(x + int(time.time())))
-    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=1, shuffle=True, num_workers=8,
+                                                  worker_init_fn=lambda x: np.random.seed(x + int(time.time())),
+                                                  collate_fn=collate_wrapper)
+    testDataLoader = torch.utils.data.DataLoader(TEST_DATASET, batch_size=1, shuffle=True, num_workers=vv['num_worker'],
                                                  pin_memory=True, drop_last=True)
     # NOTE no weight is used for our task
     # weights = torch.Tensor(TRAIN_DATASET.labelweights).cuda()
@@ -126,14 +155,20 @@ def run_task(vv, log_dir, exp_name):
         print("separately build model!", flush=True)
         contact_classifier = MODEL.get_model(vv['use_batch_norm'], 1, target='contact', 
             radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
-            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
+            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats'],
+            mlp1_size=vv['mlp1_size'], mlp2_size=vv['mlp2_size'], interpolation_mlp_size=vv['interpolation_mlp_size']
+            ).cuda()
         force_classifier = MODEL.get_model(vv['use_batch_norm'], 1, target='force', 
             radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
-            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
-        normal_classifier = MODEL.get_model(vv['use_batch_norm'], 3, target='normal', 
-            radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
-            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
-        all_classifiers = [contact_classifier, force_classifier, normal_classifier]
+            layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats'],
+            mlp1_size=vv['mlp1_size'], mlp2_size=vv['mlp2_size'], interpolation_mlp_size=vv['interpolation_mlp_size']
+            ).cuda()
+        normal_classifier = None
+            # MODEL.get_model(vv['use_batch_norm'], 3, target='normal', 
+            # radius_list=vv['radius_list'], npoint_list=vv['npoint_list'], sample_point_1_list=vv['sample_point_1_list'],
+            # layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
+        # all_classifiers = [contact_classifier, force_classifier, normal_classifier]
+        all_classifiers = [contact_classifier, force_classifier]
 
     criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([train_pos_label_weight])).cuda()
     force_criterion = weighted_mse()
@@ -147,7 +182,7 @@ def run_task(vv, log_dir, exp_name):
         #     model.apply(inplace_relu)
         contact_classifier.apply(inplace_relu)
         force_classifier.apply(inplace_relu)
-        normal_classifier.apply(inplace_relu)
+        # normal_classifier.apply(inplace_relu)
 
     def weights_init(m):
         classname = m.__class__.__name__
@@ -181,7 +216,7 @@ def run_task(vv, log_dir, exp_name):
             # contact_classifier, force_classifier, normal_classifier = all_classifiers
             contact_classifier = contact_classifier.apply(weights_init)
             force_classifier = force_classifier.apply(weights_init)
-            normal_classifier = normal_classifier.apply(weights_init)
+            # normal_classifier = normal_classifier.apply(weights_init)
 
     if args.optimizer == 'Adam':
         if not vv['separate_model']:
@@ -203,7 +238,8 @@ def run_task(vv, log_dir, exp_name):
                     eps=1e-08,
                     weight_decay=args.decay_rate
                 ))
-            contact_optimizer, force_optimizer, normal_optimizer = optimizers
+            # contact_optimizer, force_optimizer, normal_optimizer = optimizers
+            contact_optimizer, force_optimizer = optimizers
     else:
         optimizer = torch.optim.SGD(classifier.parameters(), lr=args.learning_rate, momentum=0.9)
     
@@ -214,7 +250,8 @@ def run_task(vv, log_dir, exp_name):
         schedulers = []
         for optim in optimizers:
             schedulers.append(ReduceLROnPlateau(optim, 'min', factor=0.8, patience=3, verbose=True))
-        contact_scheduler, force_scheduler, normal_scheduler = schedulers
+        # contact_scheduler, force_scheduler, normal_scheduler = schedulers
+        contact_scheduler, force_scheduler = schedulers
 
     def bn_momentum_adjust(m, momentum):
         if isinstance(m, torch.nn.BatchNorm2d) or isinstance(m, torch.nn.BatchNorm1d):
@@ -260,7 +297,7 @@ def run_task(vv, log_dir, exp_name):
                 # contact_classifier, force_classifier, normal_classifier = all_classifiers
                 contact_classifier = contact_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
                 force_classifier = force_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
-                normal_classifier = normal_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
+                # normal_classifier = normal_classifier.apply(lambda x: bn_momentum_adjust(x, momentum))
 
         # print_momentum(contact_classifier)
 
@@ -270,7 +307,7 @@ def run_task(vv, log_dir, exp_name):
         loss_sum = 0
         contact_loss_sum = 0
         force_loss_sum = 0
-        normal_loss_sum = 0
+        # normal_loss_sum = 0
         if not vv['separate_model']:
             classifier = classifier.train()
         else:
@@ -278,14 +315,27 @@ def run_task(vv, log_dir, exp_name):
             #     model = model.train()
             contact_classifier.train()
             force_classifier.train()
-            normal_classifier.train() 
+            # normal_classifier.train() 
             # force_classifier, normal_classifier = all_classifiers
 
         all_contact_pred = []
         all_batch_label = []
         force_relative_errors = []
+        # print("right before dataloading, cuda usage")
+        # print_cuda()
+
         if vv['train']:
             for i, (points, target, ori_xyz) in enumerate(trainDataLoader):
+                # print("points.dtype: ", points.dtype)
+                # print("target[0].dtype: ", target[0].dtype)
+                # print("ori_xyz.dtype: ", ori_xyz.dtype)
+
+                # print("=" * 100)
+                # print("=" * 100)
+                # print("after dataloading but before forward pass, cuda usage")
+                # print_cuda()
+
+
                 if vv['debug']:
                     if i >= 100:
                         break
@@ -296,34 +346,42 @@ def run_task(vv, log_dir, exp_name):
                     for optimizer in optimizers:
                         optimizer.zero_grad()
 
-                contact_target, force_target, normal_target = target
-                points = points.data.numpy()
-                if vv['correct_z_rotation'] == 0: # was false
-                    points[:, :, :3] = provider.rotate_point_cloud_z(points[:, :, :3])
-                elif vv['correct_z_rotation'] == 1: # was true
-                    points[:, :, :3] = provider.rotate_point_cloud_y(points[:, :, :3])
-                elif vv['correct_z_rotation'] == 2: # no augmentation
-                    pass
+                # contact_target, force_target, normal_target = target
+                contact_target, force_target = target
+                # points = points.data.numpy()
+                # if vv['correct_z_rotation'] == 0: # was false
+                #     points[:, :, :3] = provider.rotate_point_cloud_z(points[:, :, :3])
+                # elif vv['correct_z_rotation'] == 1: # was true
+                #     points[:, :, :3] = provider.rotate_point_cloud_y(points[:, :, :3])
+                # elif vv['correct_z_rotation'] == 2: # no augmentation
+                #     pass
+                # points = torch.Tensor(points)
 
-                points = torch.Tensor(points)
-                points = points.float().cuda()
+                points = points.cuda()
                 points = points.transpose(2, 1)
                 
-                contact_target = contact_target.float().cuda()
-                force_target = force_target.float().cuda()
-                normal_target = normal_target.float().cuda()
+                contact_target = contact_target.cuda()
+                force_target = force_target.cuda()
+                # print("points shape: ", points.shape)
+                # print("contact_target shape: ", contact_target.shape)
+                # print("force_target shape: ", force_target.shape)
+                # normal_target = normal_target.float().cuda()
 
                 if not vv['separate_model']:
                     pred, _ = classifier(points)
                     contact_pred, normal_pred, force_pred = pred
                 else:
+                    # print("right before forward pass, cuda usage")
+                    # print_cuda()
                     contact_pred, _ = contact_classifier(points)
                     force_pred, _ = force_classifier(points)
-                    normal_pred, _ = normal_classifier(points)
+                    # print("right after forward pass, cuda usage")
+                    # print_cuda()
+                    # normal_pred, _ = normal_classifier(points)
                     
-                contact_pred = contact_pred.contiguous().view(-1, NUM_CLASSES)
-                normal_pred = normal_pred.contiguous().view(-1, 3)
-                force_pred = force_pred.contiguous().view(-1, 1)
+                contact_pred = contact_pred.view(-1, NUM_CLASSES)
+                force_pred = force_pred.view(-1, 1)
+                # normal_pred = normal_pred.contiguous().view(-1, 3)
 
                 # contact loss
                 contact_target = contact_target.view(-1, 1)
@@ -347,18 +405,18 @@ def run_task(vv, log_dir, exp_name):
                 force_relative_errors.append(np.abs(force_pred_numpy - force_target_numpy) / np.abs(force_target_numpy)  + 1e-10)
 
                 # normal loss
-                normal_target = normal_target.view(-1, 3)
-                if vv['normal_loss_mode'] == 'contact':
-                    weight = torch.zeros_like(contact_target)
-                    weight[contact_filter] = 1
-                elif vv['normal_loss_mode'] == 'all':
-                    weight = torch.ones_like(contact_target)
-                elif vv['normal_loss_mode'] == 'balance':
-                    weight = torch.ones_like(contact_target)
-                    weight[contact_filter] = train_pos_label_weight
-                normal_loss = normal_criterion(normal_pred, normal_target, weight)
+                # normal_target = normal_target.view(-1, 3)
+                # if vv['normal_loss_mode'] == 'contact':
+                #     weight = torch.zeros_like(contact_target)
+                #     weight[contact_filter] = 1
+                # elif vv['normal_loss_mode'] == 'all':
+                #     weight = torch.ones_like(contact_target)
+                # elif vv['normal_loss_mode'] == 'balance':
+                #     weight = torch.ones_like(contact_target)
+                #     weight[contact_filter] = train_pos_label_weight
+                # normal_loss = normal_criterion(normal_pred, normal_target, weight)
 
-                loss = contact_loss + force_loss * vv['force_loss_weight'] + normal_loss * vv['normal_loss_weight']
+                loss = contact_loss + force_loss * vv['force_loss_weight'] #+ normal_loss * vv['normal_loss_weight']
 
                 loss.backward()
                 if not vv['separate_model']:
@@ -379,7 +437,7 @@ def run_task(vv, log_dir, exp_name):
                 loss_sum += loss.item()
                 contact_loss_sum += contact_loss.item()
                 force_loss_sum += force_loss.item()
-                normal_loss_sum += normal_loss.item()
+                # normal_loss_sum += normal_loss.item()
 
                 # if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
                 #     print("save plot at: ", save_visual_path, flush=True)
@@ -403,7 +461,7 @@ def run_task(vv, log_dir, exp_name):
                 else:
                     contact_scheduler.step(contact_loss_sum / num_batches)
                     force_scheduler.step(force_loss_sum / num_batches)
-                    normal_scheduler.step(normal_loss_sum / num_batches)
+                    # normal_scheduler.step(normal_loss_sum / num_batches)
 
             all_contact_pred = np.concatenate(all_contact_pred, axis=0).flatten()
             all_batch_label = np.concatenate(all_batch_label, axis=0).flatten()
@@ -420,7 +478,7 @@ def run_task(vv, log_dir, exp_name):
             print('Training mean contact loss: %f' % (contact_loss_sum / float(num_batches)))
             print('Training mean force loss: %f' % (force_loss_sum / float(num_batches)))
             print('Training mean force relative error: %f' % force_relative_error)
-            print('Training mean normal loss: %f' % (normal_loss_sum / float(num_batches)))
+            # print('Training mean normal loss: %f' % (normal_loss_sum / float(num_batches)))
             print('Training accuracy: %f' % (total_correct / float(total_seen)))
 
             print('Training all true positive: %f' % tp)
@@ -436,7 +494,7 @@ def run_task(vv, log_dir, exp_name):
             logger.record_tabular("Train/mean contact loss", contact_loss_sum / num_batches)
             logger.record_tabular("Train/mean force loss", force_loss_sum / num_batches)
             logger.record_tabular("Train/mean force relative error", force_relative_error)
-            logger.record_tabular("Train/mean normal loss", normal_loss_sum / num_batches)
+            # logger.record_tabular("Train/mean normal loss", normal_loss_sum / num_batches)
 
             logger.record_tabular("Train/true positive", tp)
             logger.record_tabular("Train/false positive", fp)
@@ -461,13 +519,15 @@ def run_task(vv, log_dir, exp_name):
                         'epoch': epoch,
                         'contact_model_state_dict': contact_classifier.state_dict(),
                         'force_model_state_dict': force_classifier.state_dict(),
-                        'normal_model_state_dict': normal_classifier.state_dict(),
+                        # 'normal_model_state_dict': normal_classifier.state_dict(),
                         'contact_optimizer_state_dict': contact_optimizer.state_dict(),
                         'force_optimizer_state_dict': force_optimizer.state_dict(),
-                        'normal_optimizer_state_dict': normal_optimizer.state_dict(),
+                        # 'normal_optimizer_state_dict': normal_optimizer.state_dict(),
                     }
                 torch.save(state, savepath)
                 print('Saving model....')
+
+
 
         '''Evaluate on chopped scenes'''
         with torch.no_grad():
@@ -477,7 +537,7 @@ def run_task(vv, log_dir, exp_name):
             loss_sum = 0
             contact_loss_sum = 0
             force_loss_sum = 0
-            normal_loss_sum = 0
+            # normal_loss_sum = 0
             force_relative_errors = []
             if not vv['separate_model']:
                 classifier = classifier.eval()
@@ -485,7 +545,7 @@ def run_task(vv, log_dir, exp_name):
                 if vv['set_eval_for_batch_norm']:
                     contact_classifier.eval()
                     force_classifier.eval()
-                    normal_classifier.eval()
+                    # normal_classifier.eval()
                 else:
                     pass
 
@@ -496,15 +556,16 @@ def run_task(vv, log_dir, exp_name):
                 if i >= 100: # TODO: solve this
                     break
 
-                points = points.data.numpy()
-                points = torch.Tensor(points)
-                points = points.float().cuda() 
+                # points = points.data.numpy()
+                # points = torch.Tensor(points)
+                points = points.cuda() 
                 points = points.transpose(2, 1)
 
-                contact_target, force_target, normal_target = target
-                contact_target = contact_target.float().cuda()
-                force_target = force_target.float().cuda()
-                normal_target = normal_target.float().cuda()
+                # contact_target, force_target, normal_target = target
+                contact_target, force_target = target
+                contact_target = contact_target.cuda()
+                force_target = force_target.cuda()
+                # normal_target = normal_target.float().cuda()
 
                 if not vv['separate_model']:
                     pred, _ = classifier(points)
@@ -512,11 +573,11 @@ def run_task(vv, log_dir, exp_name):
                 else:
                     contact_pred, _ = contact_classifier(points)
                     force_pred, _ = force_classifier(points)
-                    normal_pred, _ = normal_classifier(points)
+                    # normal_pred, _ = normal_classifier(points)
 
-                contact_pred = contact_pred.contiguous().view(-1, NUM_CLASSES)
-                normal_pred = normal_pred.contiguous().view(-1, 3)
-                force_pred = force_pred.contiguous().view(-1, 1)
+                contact_pred = contact_pred.view(-1, NUM_CLASSES)
+                force_pred = force_pred.view(-1, 1)
+                # normal_pred = normal_pred.contiguous().view(-1, 3)
 
                 # contact loss
                 contact_target = contact_target.view(-1, 1)
@@ -541,23 +602,23 @@ def run_task(vv, log_dir, exp_name):
                      / np.abs(force_target_numpy.flatten()) + 1e-10)
 
                 # normal loss
-                normal_target = normal_target.view(-1, 3)
-                if vv['normal_loss_mode'] == 'contact':
-                    weight = torch.zeros_like(contact_target)
-                    weight[contact_filter] = 1
-                elif vv['normal_loss_mode'] == 'all':
-                    weight = torch.ones_like(contact_target)
-                elif vv['normal_loss_mode'] == 'balance':
-                    weight = torch.ones_like(contact_target)
-                    weight[contact_filter] = train_pos_label_weight
-                normal_loss = normal_criterion(normal_pred, normal_target, weight)
+                # normal_target = normal_target.view(-1, 3)
+                # if vv['normal_loss_mode'] == 'contact':
+                #     weight = torch.zeros_like(contact_target)
+                #     weight[contact_filter] = 1
+                # elif vv['normal_loss_mode'] == 'all':
+                #     weight = torch.ones_like(contact_target)
+                # elif vv['normal_loss_mode'] == 'balance':
+                #     weight = torch.ones_like(contact_target)
+                #     weight[contact_filter] = train_pos_label_weight
+                # normal_loss = normal_criterion(normal_pred, normal_target, weight)
 
-                loss = contact_loss + force_loss * vv['force_loss_weight'] + normal_loss * vv['normal_loss_weight']
+                loss = contact_loss + force_loss * vv['force_loss_weight']# + normal_loss * vv['normal_loss_weight']
 
                 loss_sum += loss.item()
                 contact_loss_sum += contact_loss.item()
                 force_loss_sum += force_loss.item()
-                normal_loss_sum += normal_loss.item()
+                # normal_loss_sum += normal_loss.item()
 
                 contact_pred_val = ((contact_pred.cpu().data.numpy().reshape(-1, 1) > 0).astype(np.float)).flatten()
                 batch_label = contact_target.cpu().data.numpy().flatten()
@@ -600,7 +661,7 @@ def run_task(vv, log_dir, exp_name):
             print('eval mean contact loss: %f' % (contact_loss_sum / float(num_batches)))
             print('eval mean force loss: %f' % (force_loss_sum / float(num_batches)))
             print('eval mean force relative error: %f' % force_relative_error)
-            print('eval mean normal loss: %f' % (normal_loss_sum / float(num_batches)))
+            # print('eval mean normal loss: %f' % (normal_loss_sum / float(num_batches)))
             print('eval all accuracy: %f' % eval_acc)
             
             print('eval all true positive: %f' % tp)
@@ -615,7 +676,7 @@ def run_task(vv, log_dir, exp_name):
             logger.record_tabular("Eval/mean contact loss", contact_loss_sum / float(num_batches))
             logger.record_tabular("Eval/mean force loss", force_loss_sum / float(num_batches))
             logger.record_tabular("Eval/mean force relative error", force_relative_error)
-            logger.record_tabular("Eval/mean normal loss", normal_loss_sum / float(num_batches))
+            # logger.record_tabular("Eval/mean normal loss", normal_loss_sum / float(num_batches))
             logger.record_tabular("Eval/accuracy", eval_acc)
 
             logger.record_tabular("Eval/true positive", tp)
@@ -646,10 +707,10 @@ def run_task(vv, log_dir, exp_name):
                         'class_acc': eval_acc,
                         'contact_model_state_dict': contact_classifier.state_dict(),
                         'force_model_state_dict': force_classifier.state_dict(),
-                        'normal_model_state_dict': normal_classifier.state_dict(),
+                        # 'normal_model_state_dict': normal_classifier.state_dict(),
                         'contact_optimizer_state_dict': contact_optimizer.state_dict(),
                         'force_optimizer_state_dict': force_optimizer.state_dict(),
-                        'normal_optimizer_state_dict': normal_optimizer.state_dict(),
+                        # 'normal_optimizer_state_dict': normal_optimizer.state_dict(),
                     }
                 torch.save(state, savepath)
                 print('Saving model....')

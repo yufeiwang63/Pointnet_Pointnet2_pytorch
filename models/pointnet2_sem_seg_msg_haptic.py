@@ -66,6 +66,9 @@ class get_model(nn.Module):
             downsample=True,
             dropout=True,
             track_running_stats=True,
+            mlp1_size=[16, 16, 32],  
+            mlp2_size=[32, 32, 64],
+            interpolation_mlp_size=[128, 128, 128]
             ):
         
         super(get_model, self).__init__()
@@ -92,9 +95,9 @@ class get_model(nn.Module):
             self.fp2 = PointNetFeaturePropagation(32+64+128+128, [256, 128], use_batch_norm=use_batch_norm)
             self.fp1 = PointNetFeaturePropagation(128, [128, 128, 128], use_batch_norm=use_batch_norm)
         elif self.layer == 1:
-            self.sa1 = PointNetSetAbstractionMsg(npoint_list[0], radius_list[0], [sample_point_1_list[0], sample_point_2_list[0]], num_in_channel, [[16, 16, 32], [32, 32, 64]], use_batch_norm=use_batch_norm,
+            self.sa1 = PointNetSetAbstractionMsg(npoint_list[0], radius_list[0], [sample_point_1_list[0], sample_point_2_list[0]], num_in_channel, [mlp1_size, mlp2_size], use_batch_norm=use_batch_norm,
                 downsample=downsample, track_running_stats=track_running_stats)
-            self.fp1 = PointNetFeaturePropagation(32 + 64, [128, 128, 128], use_batch_norm=use_batch_norm, track_running_stats=track_running_stats)
+            self.fp1 = PointNetFeaturePropagation(mlp1_size[-1] + mlp2_size[-1], interpolation_mlp_size, use_batch_norm=use_batch_norm, track_running_stats=track_running_stats)
 
         self.drop_out = dropout
         self.conv1 = nn.Conv1d(128, 128, 1)

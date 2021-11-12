@@ -13,7 +13,7 @@ from haptic.Pointnet_Pointnet2_pytorch.train_semseg_haptic import run_task
 def main(mode, debug, dry):
     exp_prefix = '1106-pointNet-no-track-running-stats'
     exp_prefix = '1106-pointnet-simple-2-traj-2'
-    exp_prefix = '1111-pointnet-100'
+    exp_prefix = '1112-pointnet-100-mem-debug'
     vg = VariantGenerator()
 
     voxel_size = 0.00625 * 1.5
@@ -74,23 +74,55 @@ def main(mode, debug, dry):
         # vg.add('load_dir', ['./data/seuss/1023-pn-force-non-shared/1023-pn-force-non-shared_2021_10_23_23_59_23_0002'])
         vg.add('load_dir', [None])
         vg.add('train', [True])
+        vg.add('num_worker', [8])
     else:
+        vg.add('debug', [False])
+        vg.add('train_traj_num', [100])
+        vg.add('valid_traj_num', [10])
+        
         vg.add('use_batch_norm', [False])
+        vg.add('dropout', [False])
+        vg.add('set_eval_for_batch_norm', [False])
+        vg.add('track_running_stats', [True])
+        vg.add('adjust_momentum', [False])
+
+        vg.add('downsample', [False])
+        vg.add('radius_list', [
+            [[voxel_size*2, voxel_size*4], [voxel_size*4, voxel_size*8], [voxel_size*8, voxel_size*16], [voxel_size*16, voxel_size*32]],
+        ])
+        vg.add('npoint_list', [
+            [6000, 1500, 375, 95],
+        ])
+        vg.add('layer', [
+            1
+        ])
+        vg.add('sample_point_1_list', [
+            [16, 16, 16, 16],
+        ])
+        vg.add('sample_point_2_list', [
+            [32, 32, 32, 32],
+        ])
+
+        vg.add('npoint', [2500])
+        vg.add('batch_size', [32])
+        vg.add('mlp1_size', [[32, 64, 64]])
+        vg.add('mlp2_size', [[32, 64, 64]])
+        vg.add('interpolation_mlp_size', [[128, 128, 128]])
+
         vg.add('correct_z_rotation', [2])
-        vg.add('epoch', [5])
-        vg.add('loss_pos_weight', [-1])
-        vg.add('batch_size', [1])
-        vg.add('npoint', [-1])
+        vg.add('epoch', [500])
+        vg.add('num_worker', [1])
+        vg.add('train_pos_label_weight', [8, 11.2, 15])
         vg.add('seed', [100])
         vg.add('manual_lr_adjust', [False])
         vg.add('schedule_lr', [True])
-        vg.add('data_dir', ['simple-2-traj'])
-        # vg.add('loss_on_contact', [True, False])
+        vg.add('data_dir', ['2021-11-10-variation-1000'])
+        vg.add('learning_rate', [0.001])
         vg.add('force_loss_mode', ['balance'])
         vg.add('normal_loss_mode', ['balance'])
         vg.add('force_loss_weight', [1])
         vg.add('normal_loss_weight', [1])
-        vg.add('plot_interval', [5])
+        vg.add('plot_interval', [25])
         vg.add('separate_model', [True])
         # vg.add('load_dir', ['./data/seuss/1023-pn-force-non-shared/1023-pn-force-non-shared_2021_10_23_23_59_23_0002'])
         vg.add('load_dir', [None])
