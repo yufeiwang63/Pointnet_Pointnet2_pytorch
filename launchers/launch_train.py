@@ -104,7 +104,7 @@ def main(mode, debug, dry):
         ])
 
         vg.add('npoint', [2500])
-        vg.add('batch_size', [32])
+        vg.add('batch_size', [16])
         vg.add('mlp1_size', [[32, 64, 64]])
         vg.add('mlp2_size', [[32, 64, 64]])
         vg.add('interpolation_mlp_size', [[128, 128, 128]])

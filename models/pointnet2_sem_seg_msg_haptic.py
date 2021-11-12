@@ -71,6 +71,7 @@ class get_model(nn.Module):
             interpolation_mlp_size=[128, 128, 128]
             ):
         
+        print("using layer: ", layer)
         super(get_model, self).__init__()
         self.layer = layer
         if self.layer == 4:

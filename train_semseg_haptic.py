@@ -26,6 +26,7 @@ import json
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from matplotlib import pyplot as plt
 from haptic.Pointnet_Pointnet2_pytorch.utils import print_cuda
+import time
 
 
 def collate_wrapper(batch):
@@ -335,6 +336,10 @@ def run_task(vv, log_dir, exp_name):
                 # print("after dataloading but before forward pass, cuda usage")
                 # print_cuda()
 
+                # if i % 5000 == 0:
+                #     print("epoch {} i {}/{}".format(epoch, i, len(trainDataLoader)))
+                print(i)
+                batch_time_beg = time.time()
 
                 if vv['debug']:
                     if i >= 100:
@@ -367,6 +372,7 @@ def run_task(vv, log_dir, exp_name):
                 # print("force_target shape: ", force_target.shape)
                 # normal_target = normal_target.float().cuda()
 
+                forward_time_beg = time.time()
                 if not vv['separate_model']:
                     pred, _ = classifier(points)
                     contact_pred, normal_pred, force_pred = pred
@@ -378,7 +384,9 @@ def run_task(vv, log_dir, exp_name):
                     # print("right after forward pass, cuda usage")
                     # print_cuda()
                     # normal_pred, _ = normal_classifier(points)
+                print("forward using time: ", time.time() - forward_time_beg)
                     
+                compute_loss_time_beg = time.time()
                 contact_pred = contact_pred.view(-1, NUM_CLASSES)
                 force_pred = force_pred.view(-1, 1)
                 # normal_pred = normal_pred.contiguous().view(-1, 3)
@@ -417,17 +425,22 @@ def run_task(vv, log_dir, exp_name):
                 # normal_loss = normal_criterion(normal_pred, normal_target, weight)
 
                 loss = contact_loss + force_loss * vv['force_loss_weight'] #+ normal_loss * vv['normal_loss_weight']
+                print("compute loss time: ", time.time() - compute_loss_time_beg)
 
+                optim_time_beg = time.time()
                 loss.backward()
                 if not vv['separate_model']:
                     optimizer.step()
                 else:
                     for optimizer in optimizers:
                         optimizer.step()
+                print("optim cost time: ", time.time() - optim_time_beg)
 
+
+                stats_time_beg = time.time()
                 pred_choice = (contact_pred.cpu().data.numpy().reshape(-1, 1) > 0).astype(np.float)
                 pred_choice = pred_choice.flatten()
-                contact_batch_label = contact_target.view(-1, 1)[:, 0].cpu().data.numpy()
+                contact_batch_label = contact_target[:, 0].cpu().data.numpy()
                 correct = np.sum(pred_choice == contact_batch_label)
                 total_correct += correct
                 total_seen += points.shape[0] * points.shape[2]
@@ -437,6 +450,9 @@ def run_task(vv, log_dir, exp_name):
                 loss_sum += loss.item()
                 contact_loss_sum += contact_loss.item()
                 force_loss_sum += force_loss.item()
+                print("stats cost time: ", time.time() - stats_time_beg)
+
+                print("batch total time: ", time.time() - batch_time_beg)
                 # normal_loss_sum += normal_loss.item()
 
                 # if (epoch % args.plot_interval == 0 or epoch == args.epoch - 1) and args.train:
@@ -553,7 +569,7 @@ def run_task(vv, log_dir, exp_name):
             all_contact_pred = []
             all_batch_label = []
             for i, (points, target, ori_xyz) in enumerate(testDataLoader):
-                if i >= 100: # TODO: solve this
+                if i >= 200: # TODO: solve this
                     break
 
                 # points = points.data.numpy()
