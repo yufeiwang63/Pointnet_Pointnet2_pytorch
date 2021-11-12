@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 class HapticDataset(Dataset):
     def __init__(self, split='train', data_root='data/hapticdata/', num_point=1000,
-            transform=None, use_random_center=False):
+            transform=None, use_random_center=False, traj_num=100):
 
         super().__init__()
         self.transform = transform
@@ -23,7 +23,7 @@ class HapticDataset(Dataset):
         if "variant.json" in all_traj_file:
             all_traj_file.remove("variant.json")
         all_traj_file = sorted(all_traj_file)
-        for traj_file in all_traj_file:
+        for traj_file in all_traj_file[:traj_num]:
             traj_path = osp.join(data_root, traj_file)
             traj_data = os.listdir(traj_path)
             if 'variant.json' in traj_data:

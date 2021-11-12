@@ -13,18 +13,20 @@ from haptic.Pointnet_Pointnet2_pytorch.train_semseg_haptic import run_task
 def main(mode, debug, dry):
     exp_prefix = '1106-pointNet-no-track-running-stats'
     exp_prefix = '1106-pointnet-simple-2-traj-2'
-    exp_prefix = '1110-pointnet-1000-debug'
+    exp_prefix = '1111-pointnet-100'
     vg = VariantGenerator()
 
     voxel_size = 0.00625 * 1.5
     if not debug:
-        vg.add('debug', [True])
+        vg.add('debug', [False])
+        vg.add('train_traj_num', [100])
+        vg.add('valid_traj_num', [10])
         
-        vg.add('use_batch_norm', [True])
-        vg.add('dropout', [True])
-        vg.add('set_eval_for_batch_norm', [True])
-        vg.add('track_running_stats', [False])
-        vg.add('adjust_momentum', [True])
+        vg.add('use_batch_norm', [False])
+        vg.add('dropout', [False])
+        vg.add('set_eval_for_batch_norm', [False])
+        vg.add('track_running_stats', [True])
+        vg.add('adjust_momentum', [False])
 
         vg.add('downsample', [False])
         vg.add('radius_list', [
@@ -53,11 +55,11 @@ def main(mode, debug, dry):
         ])
 
         vg.add('npoint', [2500])
-        vg.add('batch_size', [16])
+        vg.add('batch_size', [8])
 
         vg.add('correct_z_rotation', [2])
         vg.add('epoch', [500])
-        vg.add('loss_pos_weight', [-1])
+        vg.add('train_pos_label_weight', [8, 11.2, 15])
         vg.add('seed', [100])
         vg.add('manual_lr_adjust', [False])
         vg.add('schedule_lr', [True])
@@ -67,7 +69,7 @@ def main(mode, debug, dry):
         vg.add('normal_loss_mode', ['balance'])
         vg.add('force_loss_weight', [1])
         vg.add('normal_loss_weight', [1])
-        vg.add('plot_interval', [5])
+        vg.add('plot_interval', [25])
         vg.add('separate_model', [True])
         # vg.add('load_dir', ['./data/seuss/1023-pn-force-non-shared/1023-pn-force-non-shared_2021_10_23_23_59_23_0002'])
         vg.add('load_dir', [None])

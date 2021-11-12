@@ -94,10 +94,13 @@ def run_task(vv, log_dir, exp_name):
     BATCH_SIZE = args.batch_size
 
     print("start loading training data ...")
-    TRAIN_DATASET = HapticDataset(split='train', data_root=root, num_point=args.npoint, transform=None)
+    TRAIN_DATASET = HapticDataset(split='train', data_root=root, num_point=args.npoint, traj_num=args.train_traj_num)
     print("start loading test data ...")
-    TEST_DATASET = HapticDataset(split='valid', data_root=root, num_point=args.npoint, transform=None)
-    train_num_point, train_pos_label_weight, train_data_idx = TRAIN_DATASET.get_dataset_statistics()
+    TEST_DATASET = HapticDataset(split='valid', data_root=root, num_point=args.npoint, traj_num=args.valid_traj_num)
+    if args.train_pos_label_weight == -1:
+        train_num_point, train_pos_label_weight, train_data_idx = TRAIN_DATASET.get_dataset_statistics()
+    else:
+        train_pos_label_weight = args.train_pos_label_weight
 
     trainDataLoader = torch.utils.data.DataLoader(TRAIN_DATASET, batch_size=BATCH_SIZE, shuffle=True, num_workers=8,
                                                   pin_memory=True, drop_last=True,
@@ -132,10 +135,7 @@ def run_task(vv, log_dir, exp_name):
             layer=vv['layer'], dropout=vv['dropout'], downsample=vv['downsample'], track_running_stats=vv['track_running_stats']).cuda()
         all_classifiers = [contact_classifier, force_classifier, normal_classifier]
 
-    if vv['loss_pos_weight'] > 0:
-        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([vv['loss_pos_weight']])).cuda()
-    else:
-        criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([train_pos_label_weight])).cuda()
+    criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([train_pos_label_weight])).cuda()
     force_criterion = weighted_mse()
     normal_criterion = weighted_mse()
 
@@ -493,9 +493,8 @@ def run_task(vv, log_dir, exp_name):
             all_contact_pred = []
             all_batch_label = []
             for i, (points, target, ori_xyz) in enumerate(testDataLoader):
-                if vv['debug']: 
-                    if i >= 100: # TODO: solve this
-                        break
+                if i >= 100: # TODO: solve this
+                    break
 
                 points = points.data.numpy()
                 points = torch.Tensor(points)
